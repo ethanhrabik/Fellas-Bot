@@ -162,22 +162,15 @@ function playNext(guildId) {
   const queue = queues.get(guildId);
   if (!queue) return;
 
-  const url = queue.songs.shift();
-  if (!url) {
-    queue.connection.destroy();
-    queues.delete(guildId);
-    return;
-  }
+  console.log("Playing local test.mp3");
 
-  console.log(`▶️ Playing: ${url}`);
+  const resource = createAudioResource("test.mp3");
+  queue.player.play(resource);
 
-  const ytProcess = spawn("yt-dlp", [
-    "-f",
-    "bestaudio",
-    "-o",
-    "-",
-    url
-  ]);
+  queue.player.once(AudioPlayerStatus.Idle, () => {
+    console.log("Finished test.mp3");
+  });
+}
 
   const resource = createAudioResource(ytProcess.stdout);
 
