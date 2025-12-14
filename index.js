@@ -5,18 +5,13 @@
 
 require("dotenv").config();
 
-const {
-  Client,
-  GatewayIntentBits,
-  Partials
-} = require("discord.js");
-
+const { Client, GatewayIntentBits, Partials } = require("discord.js");
 const {
   joinVoiceChannel,
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
-  NoSubscriberBehavior
+  NoSubscriberBehavior,
 } = require("@discordjs/voice");
 
 const { spawn } = require("child_process");
@@ -29,22 +24,15 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildVoiceStates,
   ],
-  partials: [Partials.Channel]
+  partials: [Partials.Channel],
 });
 
 // ==========================
 // Music State (per guild)
 // ==========================
 const queues = new Map();
-// queues[guildId] = {
-//   textChannel,
-//   voiceChannel,
-//   connection,
-//   player,
-//   songs: []
-// }
 
 // ==========================
 // Bot Ready
@@ -56,7 +44,7 @@ client.once("ready", () => {
 // ==========================
 // Message Handler
 // ==========================
-client.on("messageCreate", async message => {
+client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
   if (!message.content.startsWith("!")) return;
 
@@ -76,15 +64,12 @@ client.on("messageCreate", async message => {
 // ==========================
 // Commands
 // ==========================
-
 async function playCommand(message, args) {
   const url = args[0];
-  if (!url) return message.reply("❌ Provide a YouTube URL.");
+  if (!url) return message.reply("❌ Provide a YouTube URL or 'test'.");
 
   const voiceChannel = message.member.voice.channel;
-  if (!voiceChannel) {
-    return message.reply("❌ Join a voice channel first.");
-  }
+  if (!voiceChannel) return message.reply("❌ Join a voice channel first.");
 
   let queue = queues.get(message.guild.id);
 
@@ -96,9 +81,7 @@ async function playCommand(message, args) {
   queue.songs.push(url);
   message.reply(`🎶 Added to queue (${queue.songs.length})`);
 
-  if (!queue.player.state.resource) {
-    playNext(message.guild.id);
-  }
+  if (!queue.player.state.resource) playNext(message.guild.id);
 }
 
 function skipCommand(message) {
@@ -124,18 +107,17 @@ function stopCommand(message) {
 // ==========================
 // Queue Helpers
 // ==========================
-
 function createQueue(message, voiceChannel) {
   const player = createAudioPlayer({
     behaviors: {
-      noSubscriber: NoSubscriberBehavior.Pause
-    }
+      noSubscriber: NoSubscriberBehavior.Pause,
+    },
   });
 
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
     guildId: message.guild.id,
-    adapterCreator: message.guild.voiceAdapterCreator
+    adapterCreator: message.guild.voiceAdapterCreator,
   });
 
   connection.subscribe(player);
@@ -144,7 +126,7 @@ function createQueue(message, voiceChannel) {
     playNext(message.guild.id);
   });
 
-  player.on("error", error => {
+  player.on("error", (error) => {
     console.error("Audio player error:", error);
     playNext(message.guild.id);
   });
@@ -154,28 +136,69 @@ function createQueue(message, voiceChannel) {
     voiceChannel,
     connection,
     player,
-    songs: []
+    songs: [],
   };
 }
 
+// ==========================
+// Play Next
+// ==========================
 function playNext(guildId) {
   const queue = queues.get(guildId);
   if (!queue) return;
 
-  console.log("Playing local test.mp3");
+  const url = queue.songs.shift();
+  if (!url) {
+    queue.connection.destroy();
+    queues.delete(guildId);
+    return;
+  }
 
-  const resource = createAudioResource("test.mp3");
+  console.log("▶️ Playing:", url);
+
+  // Local test file
+  if (url === "test") {
+    const resource = createAudioResource("test.mp3");
+    queue.player.play(resource);
+    queue.player.once(AudioPlayerStatus.Idle, () => {
+      console.log("Finished test.mp3");
+      playNext(guildId);
+    });
+    return;
+  }
+
+  // YouTube streaming
+  const ytProcess = spawn("yt-dlp", ["-f", "bestaudio", "-o", "-", url]);
+  const ffmpegProcess = spawn("ffmpeg", [
+    "-i",
+    "pipe:0",
+    "-f",
+    "s16le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "pipe:1",
+  ]);
+
+  ytProcess.stdout.pipe(ffmpegProcess.stdin);
+
+  const resource = createAudioResource(ffmpegProcess.stdout);
   queue.player.play(resource);
 
   queue.player.once(AudioPlayerStatus.Idle, () => {
-    console.log("Finished test.mp3");
+    console.log("Finished playing:", url);
+    playNext(guildId);
+  });
+
+  ytProcess.stderr.on("data", (data) => {
+    console.error("yt-dlp error:", data.toString());
+  });
+
+  ffmpegProcess.stderr.on("data", (data) => {
+    console.error("ffmpeg error:", data.toString());
   });
 }
-
-  const resource = createAudioResource(ytProcess.stdout);
-
-  queue.player.play(resource);
-
 
 // ==========================
 // Login
