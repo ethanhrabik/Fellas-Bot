@@ -175,7 +175,7 @@ function playNext(guildId) {
   const resource = createAudioResource(ytProcess.stdout);
 
   queue.player.play(resource);
-}
+
 
 // ==========================
 // Login
