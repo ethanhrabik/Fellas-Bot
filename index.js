@@ -15,6 +15,7 @@ const {
 } = require("@discordjs/voice");
 
 const { spawn } = require("child_process");
+const path = require("path");
 
 // ==========================
 // Client Setup
@@ -33,6 +34,11 @@ const client = new Client({
 // Music State (per guild)
 // ==========================
 const queues = new Map();
+
+// ==========================
+// Cookies Path
+// ==========================
+const COOKIES_PATH = path.join(__dirname, "cookies.txt"); // put your exported YouTube cookies here
 
 // ==========================
 // Bot Ready
@@ -141,7 +147,7 @@ function createQueue(message, voiceChannel) {
 }
 
 // ==========================
-// Play Next
+// Play Next Function
 // ==========================
 function playNext(guildId) {
   const queue = queues.get(guildId);
@@ -167,37 +173,62 @@ function playNext(guildId) {
     return;
   }
 
-  // YouTube streaming
-  const ytProcess = spawn("yt-dlp", ["-f", "bestaudio", "-o", "-", url]);
-  const ffmpegProcess = spawn("ffmpeg", [
-    "-i",
-    "pipe:0",
-    "-f",
-    "s16le",
-    "-ar",
-    "48000",
-    "-ac",
-    "2",
-    "pipe:1",
-  ]);
+  try {
+    // Spawn yt-dlp with cookies to bypass bot checks
+    const ytProcess = spawn("yt-dlp", [
+      "-f",
+      "bestaudio",
+      "--cookies",
+      COOKIES_PATH,
+      "-o",
+      "-",
+      url,
+    ]);
 
-  ytProcess.stdout.pipe(ffmpegProcess.stdin);
+    // Pipe into ffmpeg
+    const ffmpegProcess = spawn("ffmpeg", [
+      "-i",
+      "pipe:0",
+      "-f",
+      "s16le",
+      "-ar",
+      "48000",
+      "-ac",
+      "2",
+      "pipe:1",
+    ]);
 
-  const resource = createAudioResource(ffmpegProcess.stdout);
-  queue.player.play(resource);
+    ytProcess.stdout.pipe(ffmpegProcess.stdin);
 
-  queue.player.once(AudioPlayerStatus.Idle, () => {
-    console.log("Finished playing:", url);
-    playNext(guildId);
-  });
+    const resource = createAudioResource(ffmpegProcess.stdout);
+    queue.player.play(resource);
 
-  ytProcess.stderr.on("data", (data) => {
-    console.error("yt-dlp error:", data.toString());
-  });
+    // Handle end of track
+    queue.player.once(AudioPlayerStatus.Idle, () => {
+      console.log("Finished playing:", url);
+      playNext(guildId);
+    });
 
-  ffmpegProcess.stderr.on("data", (data) => {
-    console.error("ffmpeg error:", data.toString());
-  });
+    // Log errors
+    ytProcess.stderr.on("data", (data) => {
+      console.error("yt-dlp error:", data.toString());
+    });
+
+    ffmpegProcess.stderr.on("data", (data) => {
+      console.error("ffmpeg error:", data.toString());
+    });
+
+    // Skip broken video
+    ytProcess.on("close", (code) => {
+      if (code !== 0) {
+        console.log(`⚠️ yt-dlp failed with code ${code}, skipping`);
+        playNext(guildId);
+      }
+    });
+  } catch (err) {
+    console.error("Failed to play URL:", err);
+    playNext(guildId); // skip broken URL
+  }
 }
 
 // ==========================
